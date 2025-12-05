@@ -5,6 +5,13 @@ on:
     - cron: "58 5 * * *"
   workflow_dispatch:
 
+env:
+  # Use docker.io for Docker Hub if empty
+  REGISTRY: ghcr.io
+  # github.repository as <account>/<repo>
+  IMAGE_NAME: ${{ github.repository }}
+  TARGET_TAG: latest
+
 jobs:
   version-check:
     name: Compare Local and Upstream Versions
@@ -47,10 +54,21 @@ jobs:
         run: |
           set -e
           echo "Getting upstream version"
-          UPSTREAM_VERSION=$(wget -q "https://hub.docker.com/v2/repositories/library/mediawiki/tags/latest" -O - | jq '.digest' )
+          UPSTREAM_VERSION=$(wget -q "https://hub.docker.com/v2/repositories/library/mediawiki/tags/${{ env.TARGET_TAG }}" -O - | jq '.digest' )
+          echo UPSTREAM_VERSION $UPSTREAM_VERSION
+          LATEST_TAGS="$(wget -q "https://hub.docker.com/v2/repositories/library/mediawiki/tags" -O - | jq '.results | map(select(.digest == '$UPSTREAM_VERSION')) | map(.name) | join("\n")' | sed 's/"//g')"
+          echo LATEST_TAGS $LATEST_TAGS
+          FULL_VERSION=$(echo -e $LATEST_TAGS | grep '^[0-9]\+\.[0-9]\+\.[0-9]\+$')
+          echo FULL_VERSION $FULL_VERSION
+          EXTENSION_VERSION=$(echo -e $LATEST_TAGS | grep '^[0-9]\+\.[0-9]\+$' | sed 's/\./_/g')
+          echo EXTENSION_VERSION $EXTENSION_VERSION
           echo -n $UPSTREAM_VERSION > current_version_file
-          echo "Upstream version: $UPSTREAM_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "Upstream hash: $UPSTREAM_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "Upstream version: $FULL_VERSION" >> $GITHUB_STEP_SUMMARY
           echo "upstream_version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
+          echo "latest_tags=$LATEST_TAGS" >> $GITHUB_OUTPUT
+          echo "extension_version=REL$EXTENSION_VERSION" >> $GITHUB_OUTPUT
+          echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
 
       - name: Cache current version
         uses: actions/cache/save@v4
@@ -65,6 +83,8 @@ jobs:
           UPSTREAM_VERSION: ${{ steps.get_upstream_version.outputs.upstream_version }}
         run: |
           set -e
+          echo "update_required=true" >> $GITHUB_OUTPUT
+          exit
           if [ "$UPSTREAM_VERSION" == "$CURRENT_VERSION" ]; then
               echo "Current version $CURRENT_VERSION is equal to Upstream version $UPSTREAM_VERSION."
               echo "No update required." >> $GITHUB_STEP_SUMMARY
@@ -75,15 +95,65 @@ jobs:
               echo "update_required=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create release
-        if: ${{ steps.compare_versions.outputs.update_required == true }}
-        uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
-          NEW_VERSION: ${{ steps.get_upstream_version.outputs.upstream_version }}
+      # Set up QEMU for cross-platform builds
+      - name: Set up QEMU
+        if: ${{ steps.compare_versions.outputs.update_required == 'true' }}
+        uses: docker/setup-qemu-action@v3
         with:
-          tag_name: ${{ steps.get_upstream_version.outputs.upstream_version }}
-          body: MediaWiki version bump
-          generate_release_notes: true
-          append_body: true
-          make_latest: true
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+
+      # Set up BuildKit Docker container builder to be able to build
+      # multi-platform images and export cache
+      # https://github.com/docker/setup-buildx-action
+      - name: Set up Docker Buildx
+        if: ${{ steps.compare_versions.outputs.update_required == 'true' }}
+        uses: docker/setup-buildx-action@v3.11.1
+
+      # Login against a Docker registry except on PR
+      # https://github.com/docker/login-action
+      - name: Log into registry ${{ env.REGISTRY }}
+        if: ${{ steps.compare_versions.outputs.update_required == 'true' }}
+        uses: docker/login-action@v3.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Extract metadata (tags, labels) for Docker
+      # https://github.com/docker/metadata-action
+      - name: Extract Docker metadata
+        if: ${{ steps.compare_versions.outputs.update_required == 'true' }}
+        id: meta
+        uses: docker/metadata-action@v5.10.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=auto
+          tags: ${{ steps.upstream_version.outputs.latest_tags }}
+
+      - name: DEBUG
+        run:
+          echo "${{ steps.get_upstream_version.outputs.extension_version }}"
+          echo "${{ steps.get_upstream_version.outputs.full_version }}"
+
+      # Build and push Docker image with Buildx (don't push on PR)
+      # https://github.com/docker/build-push-action
+      - name: Build and push Docker image
+        if: ${{ steps.compare_versions.outputs.update_required == 'true' }}
+        id: build-and-push
+        uses: docker/build-push-action@v6
+        env:
+          VERSION: ${{ steps.get_upstream_version.outputs.full_version }}
+          EXTENSION_BRANCH: ${{ steps.get_upstream_version.outputs.extension_version }}
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.get_upstream_version.outputs.full_version }}
+            EXTENSION_BRANCH=${{ steps.get_upstream_version.outputs.extension_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
