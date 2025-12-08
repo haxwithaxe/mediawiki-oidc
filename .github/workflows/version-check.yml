@@ -55,18 +55,16 @@ jobs:
           set -e
           echo "Getting upstream version"
           UPSTREAM_VERSION=$(wget -q "https://hub.docker.com/v2/repositories/library/mediawiki/tags/${{ env.TARGET_TAG }}" -O - | jq '.digest' )
-          echo UPSTREAM_VERSION $UPSTREAM_VERSION
-          LATEST_TAGS="$(wget -q "https://hub.docker.com/v2/repositories/library/mediawiki/tags" -O - | jq '.results | map(select(.digest == '$UPSTREAM_VERSION')) | map(.name) | join("\n")' | sed 's/"//g')"
-          echo LATEST_TAGS $LATEST_TAGS
+          TAGS_JSON="$(wget -q "https://hub.docker.com/v2/repositories/library/mediawiki/tags" -O -)"
+          LATEST_TAGS_JSON="$(echo $TAGS_JSON | jq '.results | map(select(.digest == '$UPSTREAM_VERSION')) | map("type=raw,enable=true,value="+.name)' | tr '\n' ' ')"
+          echo "latest_tags_json=$LATEST_TAGS_JSON" >> $GITHUB_OUTPUT
+          LATEST_TAGS="$(echo $TAGS_JSON | jq '.results | map(select(.digest == '$UPSTREAM_VERSION')) | map(.name)| join("\n")' | sed 's/"//g')"
           FULL_VERSION=$(echo -e $LATEST_TAGS | grep '^[0-9]\+\.[0-9]\+\.[0-9]\+$')
-          echo FULL_VERSION $FULL_VERSION
           EXTENSION_VERSION=$(echo -e $LATEST_TAGS | grep '^[0-9]\+\.[0-9]\+$' | sed 's/\./_/g')
-          echo EXTENSION_VERSION $EXTENSION_VERSION
           echo -n $UPSTREAM_VERSION > current_version_file
           echo "Upstream hash: $UPSTREAM_VERSION" >> $GITHUB_STEP_SUMMARY
           echo "Upstream version: $FULL_VERSION" >> $GITHUB_STEP_SUMMARY
           echo "upstream_version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
-          echo "latest_tags=$LATEST_TAGS" >> $GITHUB_OUTPUT
           echo "extension_version=REL$EXTENSION_VERSION" >> $GITHUB_OUTPUT
           echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
 
@@ -129,12 +127,9 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           flavor: |
             latest=auto
-          tags: ${{ steps.upstream_version.outputs.latest_tags }}
-
-      - name: DEBUG
-        run:
-          echo "${{ steps.get_upstream_version.outputs.extension_version }}"
-          echo "${{ steps.get_upstream_version.outputs.full_version }}"
+          tags: |-
+            ${{ join(fromJSON(steps.get_upstream_version.outputs.latest_tags_json), '
+            ') }}
 
       # Build and push Docker image with Buildx (don't push on PR)
       # https://github.com/docker/build-push-action
