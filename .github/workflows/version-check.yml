@@ -60,12 +60,13 @@ jobs:
           echo "latest_tags_json=$LATEST_TAGS_JSON" >> $GITHUB_OUTPUT
           LATEST_TAGS="$(echo $TAGS_JSON | jq '.results | map(select(.digest == '$UPSTREAM_VERSION')) | map(.name)| join("\n")' | sed 's/"//g')"
           FULL_VERSION=$(echo -e $LATEST_TAGS | grep '^[0-9]\+\.[0-9]\+\.[0-9]\+$')
-          EXTENSION_VERSION=$(echo -e $LATEST_TAGS | grep '^[0-9]\+\.[0-9]\+$' | sed 's/\./_/g')
+          EXTENSION_VERSION=$(echo $FULL_VERSION | sed 's/^\([0-9]\+\.[0-9]\+\).*/\1/' | sed 's/\./_/g')
           echo -n $UPSTREAM_VERSION > current_version_file
           echo "Upstream hash: $UPSTREAM_VERSION" >> $GITHUB_STEP_SUMMARY
           echo "Upstream version: $FULL_VERSION" >> $GITHUB_STEP_SUMMARY
           echo "upstream_version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
           echo "extension_version=REL$EXTENSION_VERSION" >> $GITHUB_OUTPUT
+          echo "Extension version: REL$EXTENSION_VERSION" >> $GITHUB_STEP_SUMMARY
           echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
 
       - name: Cache current version
