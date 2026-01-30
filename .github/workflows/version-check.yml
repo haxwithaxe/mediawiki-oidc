@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions: write-all
     outputs:
-      update_required: ${{ steps.compare_versions.outputs.update_required }}
+      update_required: ${{ steps.compare_version_hashes.outputs.update_required }}
       current_version: ${{ steps.get_release_version.outputs.current_version }}
       upstream_version: ${{ steps.get_upstream_version.outputs.upstream_version }}
 
@@ -36,67 +36,107 @@ jobs:
           path: current_version_file
           fail-on-cache-miss: false
 
-      - name: Get current version
-        id: get_current_version
+      - name: Get current version hash
+        id: get_current_version_hash
         run: |
           set -e
-          echo "Getting current version"
+          echo "Getting current version hash"
           if [ -f current_version_file ]; then
-            CURRENT_VERSION=$(cat current_version_file)
+            CURRENT_VERSION_HASH=$(cat current_version_file)
           else
             CURRENT_VERSION="no-version"
           fi
-          echo "Current version: $CURRENT_VERSION" >> $GITHUB_STEP_SUMMARY
-          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version hash: $CURRENT_VERSION_HASH" >> $GITHUB_STEP_SUMMARY
+          echo "current_version_hash=$CURRENT_VERSION_HASH" >> $GITHUB_OUTPUT
 
-      - name: Get upstream version
-        id: get_upstream_version
+      - name: Download upstream target tag info
+        run: |
+          wget -q "https://hub.docker.com/v2/repositories/library/mediawiki/tags/${{ env.TARGET_TAG }}" -O "${{ env.TARGET_TAG }}.json"
+
+      - name: Get upstream version hash
+        id: get_upstream_version_hash
         run: |
           set -e
-          echo "Getting upstream version"
-          UPSTREAM_VERSION=$(wget -q "https://hub.docker.com/v2/repositories/library/mediawiki/tags/${{ env.TARGET_TAG }}" -O - | jq '.digest' )
-          TAGS_JSON="$(wget -q "https://hub.docker.com/v2/repositories/library/mediawiki/tags" -O -)"
-          LATEST_TAGS_JSON="$(echo $TAGS_JSON | jq '.results | map(select(.digest == '$UPSTREAM_VERSION')) | map("type=raw,enable=true,value="+.name)' | tr '\n' ' ')"
-          echo "latest_tags_json=$LATEST_TAGS_JSON" >> $GITHUB_OUTPUT
-          LATEST_TAGS="$(echo $TAGS_JSON | jq '.results | map(select(.digest == '$UPSTREAM_VERSION')) | map(.name)| join("\n")' | sed 's/"//g')"
-          FULL_VERSION=$(echo -e $LATEST_TAGS | grep '^[0-9]\+\.[0-9]\+\.[0-9]\+$')
-          EXTENSION_VERSION=$(echo $FULL_VERSION | sed 's/^\([0-9]\+\.[0-9]\+\).*/\1/' | sed 's/\./_/g')
-          echo -n $UPSTREAM_VERSION > current_version_file
-          echo "Upstream hash: $UPSTREAM_VERSION" >> $GITHUB_STEP_SUMMARY
-          echo "Upstream version: $FULL_VERSION" >> $GITHUB_STEP_SUMMARY
-          echo "upstream_version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
-          echo "extension_version=REL$EXTENSION_VERSION" >> $GITHUB_OUTPUT
-          echo "Extension version: REL$EXTENSION_VERSION" >> $GITHUB_STEP_SUMMARY
-          echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
+          echo "Getting upstream version hash for ${{ env.TARGET_TAG }}"
+          UPSTREAM_VERSION_HASH=$(jq '.digest' "${{ env.TARGET_TAG }}.json")
+          # The `current_version_file` has already been read by now
+          echo -n $UPSTREAM_VERSION_HASH > current_version_file
+          echo "upstream_version_hash=$UPSTREAM_VERSION_HASH" >> $GITHUB_OUTPUT
+          echo "Upstream hash: $UPSTREAM_VERSION_HASH" >> $GITHUB_STEP_SUMMARY
 
-      - name: Cache current version
-        uses: actions/cache/save@v5
-        with:
-          key: current_version
-          path: current_version_file
-
-      - name: Compare versions
-        id: compare_versions
+      - name: Compare version hashes
+        id: compare_version_hashes
         env:
-          CURRENT_VERSION: ${{ steps.get_current_version.outputs.current_version }}
-          UPSTREAM_VERSION: ${{ steps.get_upstream_version.outputs.upstream_version }}
+          CURRENT_VERSION_HASH: ${{ steps.get_current_version_hash.outputs.current_version_hash }}
+          UPSTREAM_VERSION_HASH: ${{ steps.get_upstream_version_hash.outputs.upstream_version_hash }}
         run: |
           set -e
-          echo "update_required=true" >> $GITHUB_OUTPUT
-          exit
-          if [ "$UPSTREAM_VERSION" == "$CURRENT_VERSION" ]; then
-              echo "Current version $CURRENT_VERSION is equal to Upstream version $UPSTREAM_VERSION."
+          if [ "$UPSTREAM_VERSION_HASH" == "$CURRENT_VERSION_HASH" ]; then
+              echo "Current version $CURRENT_VERSION_HASH is equal to Upstream version $UPSTREAM_VERSION_HASH."
               echo "No update required." >> $GITHUB_STEP_SUMMARY
               echo "update_required=false" >> $GITHUB_OUTPUT
           else
-              echo "Upstream version $UPSTREAM_VERSION is newer than Current version $CURRENT_VERSION."
+              echo "Upstream version $UPSTREAM_VERSION_HASH is different from the Current version $CURRENT_VERSION_HASH."
               echo "Creating release... :rocket:" >> $GITHUB_STEP_SUMMARY
               echo "update_required=true" >> $GITHUB_OUTPUT
           fi
 
+      - name: Download all upstream tags info for target tag
+        if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
+        run: |
+          wget -q "https://hub.docker.com/v2/repositories/library/mediawiki/tags" -O tags.json
+
+      - name: Get upstream tag aliases for target tag
+        if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
+        id: get_upstream_tags
+        env:
+          UPSTREAM_VERSION_HASH: ${{ steps.get_upstream_version_hash.outputs.upstream_version_hash }}
+        run: |
+          set -e
+          echo "Getting upstream tags for ${{ env.TARGET_TAG }}"
+          TARGET_TAGS_JSON="$(jq '.results | map(select(.digest == '$UPSTREAM_VERSION_HASH')) | map("type=raw,enable=true,value="+.name)' tags.json | tr '\n' ' ')"
+          if [[ "$TARGET_TAGS_JSON" == "[] " ]]; then
+            echo "Target tag hash not found in upstream tags." >> $GITHUB_STEP_SUMMARY
+            echo "Target tag hash: ${UPSTREAM_VERSION_HASH}" >> $GITHUB_STEP_SUMMARY
+            echo "All hashes:" >> $GITHUB_STEP_SUMMARY
+            jq '.results | map(.digest +" "+.name)' tags.json >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "target_tags_json=$TARGET_TAGS_JSON"  # DEBUG
+          echo "target_tags_json=$TARGET_TAGS_JSON" >> $GITHUB_OUTPUT
+          TARGET_TAGS="$(jq '.results | map(select(.digest == '$UPSTREAM_VERSION_HASH')) | map(.name)| join("\n")' tags.json | sed 's/"//g')"
+          echo "target_tags=$TARGET_TAGS"  # DEBUG
+          echo "target_tags=$TARGET_TAGS" >> $GITHUB_OUTPUT
+          echo "Latest tags: $TARGET_TAGS" >> $GITHUB_STEP_SUMMARY
+
+      - name: Get upstream full version number
+        if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
+        id: get_upstream_full_version
+        env:
+          TARGET_TAGS: ${{ steps.get_upstream_tags.outputs.target_tags }}
+        run: |
+          set -e
+          echo "Getting full upstream version number"
+          FULL_VERSION=$(echo -e $TARGET_TAGS | grep '^[0-9]\+\.[0-9]\+\.[0-9]\+$')
+          echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
+          echo "Upstream full version number: $FULL_VERSION" >> $GITHUB_STEP_SUMMARY
+
+      - name: Get upstream extension version number part
+        if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
+        id: get_upstream_extension_version
+        env:
+          FULL_VERSION: ${{ steps.get_upstream_full_version.outputs.full_version }}
+        run: |
+          set -e
+          echo "Getting upstream extension version"
+          EXTENSION_VERSION=$(echo $FULL_VERSION | sed 's/^\([0-9]\+\.[0-9]\+\).*/\1/' | sed 's/\./_/g')
+          echo "extension_version=REL$EXTENSION_VERSION" >> $GITHUB_OUTPUT
+          echo "Extension version: REL$EXTENSION_VERSION" >> $GITHUB_STEP_SUMMARY
+
+
       # Set up QEMU for cross-platform builds
       - name: Set up QEMU
-        if: ${{ steps.compare_versions.outputs.update_required == 'true' }}
+        if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
         uses: docker/setup-qemu-action@v3
         with:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
@@ -105,13 +145,14 @@ jobs:
       # multi-platform images and export cache
       # https://github.com/docker/setup-buildx-action
       - name: Set up Docker Buildx
-        if: ${{ steps.compare_versions.outputs.update_required == 'true' }}
+        if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
         uses: docker/setup-buildx-action@v3.12.0
+        uses: docker/setup-buildx-action@v3.11.1
 
       # Login against a Docker registry except on PR
       # https://github.com/docker/login-action
       - name: Log into registry ${{ env.REGISTRY }}
-        if: ${{ steps.compare_versions.outputs.update_required == 'true' }}
+        if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
         uses: docker/login-action@v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -121,7 +162,7 @@ jobs:
       # Extract metadata (tags, labels) for Docker
       # https://github.com/docker/metadata-action
       - name: Extract Docker metadata
-        if: ${{ steps.compare_versions.outputs.update_required == 'true' }}
+        if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
         id: meta
         uses: docker/metadata-action@v5.10.0
         with:
@@ -129,18 +170,18 @@ jobs:
           flavor: |
             latest=auto
           tags: |-
-            ${{ join(fromJSON(steps.get_upstream_version.outputs.latest_tags_json), '
+            ${{ join(fromJSON(steps.get_upstream_tags.outputs.target_tags_json), '
             ') }}
 
       # Build and push Docker image with Buildx (don't push on PR)
       # https://github.com/docker/build-push-action
       - name: Build and push Docker image
-        if: ${{ steps.compare_versions.outputs.update_required == 'true' }}
+        if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
         id: build-and-push
         uses: docker/build-push-action@v6
         env:
-          VERSION: ${{ steps.get_upstream_version.outputs.full_version }}
-          EXTENSION_BRANCH: ${{ steps.get_upstream_version.outputs.extension_version }}
+          VERSION: ${{ steps.get_upstream_full_version.outputs.full_version }}
+          EXTENSION_BRANCH: ${{ steps.get_upstream_extension_version.outputs.extension_version }}
         with:
           context: .
           file: Dockerfile
@@ -149,7 +190,14 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ steps.get_upstream_version.outputs.full_version }}
-            EXTENSION_BRANCH=${{ steps.get_upstream_version.outputs.extension_version }}
+            VERSION=${{ steps.get_upstream_full_version.outputs.full_version }}
+            EXTENSION_BRANCH=${{ steps.get_upstream_extension_version.outputs.extension_version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Cache new current version hash
+        uses: actions/cache/save@v4
+        with:
+          key: current_version
+          path: current_version_file
+
