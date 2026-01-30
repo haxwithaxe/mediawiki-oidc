@@ -107,7 +107,7 @@ jobs:
         run: |
           set -e
           echo "Getting full upstream version number"
-          FULL_VERSION=$(echo $TARGET_TAGS | sed 's/, /\n/g' | grep '^[0-9]\+\.[0-9]\+\.[0-9]\+$')
+          FULL_VERSION=$(echo $TARGET_TAGS | sed 's/, /\n/g' | grep '^[0-9]\+\.[0-9]\+\.[0-9]\+-\?[a-zA-Z]\+$')
           echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
           echo "Upstream full version number: $FULL_VERSION" >> $GITHUB_STEP_SUMMARY
 
