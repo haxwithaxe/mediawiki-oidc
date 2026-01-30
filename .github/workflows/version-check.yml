@@ -81,33 +81,23 @@ jobs:
               echo "update_required=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Download all upstream tags info for target tag
+      - name: Download the repo manifest
         if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
         run: |
-          wget -q "https://hub.docker.com/v2/repositories/library/mediawiki/tags" -O tags.json
+          wget -q "https://github.com/docker-library/official-images/raw/refs/heads/master/library/mediawiki" -O manifest.txt
 
       - name: Get upstream tag aliases for target tag
         if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
         id: get_upstream_tags
-        env:
-          UPSTREAM_VERSION_HASH: ${{ steps.get_upstream_version_hash.outputs.upstream_version_hash }}
         run: |
           set -e
-          echo "Getting upstream tags for ${{ env.TARGET_TAG }}"
-          TARGET_TAGS_JSON="$(jq '.results | map(select(.digest == '$UPSTREAM_VERSION_HASH')) | map("type=raw,enable=true,value="+.name)' tags.json | tr '\n' ' ')"
-          if [[ "$TARGET_TAGS_JSON" == "[] " ]]; then
-            echo "Target tag hash not found in upstream tags." >> $GITHUB_STEP_SUMMARY
-            echo "Target tag hash: ${UPSTREAM_VERSION_HASH}" >> $GITHUB_STEP_SUMMARY
-            echo "All hashes:" >> $GITHUB_STEP_SUMMARY
-            jq '.results | map(.digest +" "+.name)' tags.json >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
-          echo "target_tags_json=$TARGET_TAGS_JSON"  # DEBUG
+          echo "Getting upstream tag aliases for ${{ env.TARGET_TAG }}"
+          TARGET_TAGS="$(grep '^Tags:' | sed 's/$/, /'  manifest.txt | grep ' '${{ env.TARGET_TAG }}',' | sed 's/^Tags: *//;s/, $//')"
+          echo "Found tags for ${{ env.TARGET_TAG }}: $TARGET_TAGS"
+          echo "target_tags=${TARGET_TAGS}" >> $GITHUB_OUTPUT
+          TARGET_TAGS_JSON='["'$(echo $ALL_TAGS | sed 's/, $//;s/, /", "/g')'"]'
           echo "target_tags_json=$TARGET_TAGS_JSON" >> $GITHUB_OUTPUT
-          TARGET_TAGS="$(jq '.results | map(select(.digest == '$UPSTREAM_VERSION_HASH')) | map(.name)| join("\n")' tags.json | sed 's/"//g')"
-          echo "target_tags=$TARGET_TAGS"  # DEBUG
-          echo "target_tags=$TARGET_TAGS" >> $GITHUB_OUTPUT
-          echo "Latest tags: $TARGET_TAGS" >> $GITHUB_STEP_SUMMARY
+          echo "Alias tags for ${{ env.TARGET_TAG }}: $TARGET_TAGS" >> $GITHUB_STEP_SUMMARY
 
       - name: Get upstream full version number
         if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
@@ -117,7 +107,7 @@ jobs:
         run: |
           set -e
           echo "Getting full upstream version number"
-          FULL_VERSION=$(echo -e $TARGET_TAGS | grep '^[0-9]\+\.[0-9]\+\.[0-9]\+$')
+          FULL_VERSION=$(echo $TARGET_TAGS | sed 's/, /\n/g' | grep '^[0-9]\+\.[0-9]\+\.[0-9]\+$')
           echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
           echo "Upstream full version number: $FULL_VERSION" >> $GITHUB_STEP_SUMMARY
 
