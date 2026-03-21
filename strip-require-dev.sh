@@ -14,9 +14,7 @@ for thing in \
 	vendor/composer.json \
 	vendor/composer.lock \
 	skins/*/composer.json \
-	skins/*/composer.lock \
 	extensions/*/composer.json \
-	extensions/*/composer.lock
 	do 
 		strip_require_dev "$thing"
 		add_security_exception "$thing" "PKSA-y2cr-5h3j-g3ys" "Not a real vuln. A lib is not responsible for people abusing it."
