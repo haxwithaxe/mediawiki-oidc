@@ -2,7 +2,7 @@ ARG VERSION=1.44
 
 FROM mediawiki:${VERSION}
 
-ARG EXTENSION_BRANCH="REL1_44"
+ARG EXTENSION_BRANCH="REL1_45"
 
 WORKDIR /var/www/html
 COPY ./composer.local.json composer.local.json
