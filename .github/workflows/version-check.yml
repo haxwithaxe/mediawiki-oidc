@@ -30,7 +30,7 @@ jobs:
           fetch-depth: 0
 
       - name: Load current version
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           key: current_version
           path: current_version_file
@@ -70,7 +70,7 @@ jobs:
           echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
 
       - name: Cache current version
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           key: current_version
           path: current_version_file
