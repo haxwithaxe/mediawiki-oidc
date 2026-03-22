@@ -9,7 +9,7 @@ strip_require_dev() {
 
 add_security_exception() {
 	set -x
-	jq '.config.audit.ignore |= {"'$2'": "'$3'"}' "$1" > composer.thing.tmp 
+	jq '.config.audit.ignore |= {"'"$2"'": "'"$3"'"}' "$1" > composer.thing.tmp 
 	#set +x
 	mv composer.thing.tmp "$1"
 }
