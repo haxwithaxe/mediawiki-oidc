@@ -1,12 +1,16 @@
 #!/bin/sh
 
+set -e
+
 strip_require_dev() {
 	jq 'del(.. | .["require-dev"]?)' "$1" > composer.thing.tmp
 	mv composer.thing.tmp "$1"
 }
 
 add_security_exception() {
+	set -x
 	jq '.config.audit.ignore |= {"'$2'": "'$3'"}' "$1" > composer.thing.tmp 
+	set +x
 	mv composer.thing.tmp "$1"
 }
 
@@ -16,6 +20,13 @@ for thing in \
 	skins/*/composer.json \
 	extensions/*/composer.json
 	do 
+		file "$thing"
+		if [ "$(file -b "$1")" != "JSON text data"]; then
+			echo $1 is not JSON
+			cat "$1"
+			echo EOF $1
+			exit 255
+		fi
 		strip_require_dev "$thing"
 		add_security_exception "$thing" "PKSA-y2cr-5h3j-g3ys" "Not a real vuln. A lib is not responsible for people abusing it."
 		add_security_exception "$thing" "PKSA-z3gr-8qht-p93v" "Dev requirement not used in production"
