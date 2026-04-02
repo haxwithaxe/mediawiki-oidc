@@ -127,7 +127,7 @@ jobs:
       # Set up QEMU for cross-platform builds
       - name: Set up QEMU
         if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
 
