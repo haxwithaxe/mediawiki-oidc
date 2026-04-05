@@ -185,7 +185,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Cache new current version hash
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           key: current_version
           path: current_version_file
