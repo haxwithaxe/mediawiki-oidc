@@ -167,7 +167,7 @@ jobs:
       - name: Build and push Docker image
         if: ${{ steps.compare_version_hashes.outputs.update_required == 'true' }}
         id: build-and-push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         env:
           VERSION: ${{ steps.get_upstream_full_version.outputs.full_version }}
           EXTENSION_BRANCH: ${{ steps.get_upstream_extension_version.outputs.extension_version }}
