@@ -30,7 +30,7 @@ jobs:
           fetch-depth: 0
 
       - name: Load current version
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           key: current_version
           path: current_version_file
@@ -185,7 +185,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Cache new current version hash
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           key: current_version
           path: current_version_file
